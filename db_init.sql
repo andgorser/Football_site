@@ -52,7 +52,7 @@ CREATE TABLE matches (
     division_id INT REFERENCES divisions(division_id) /* ON DELETE SET NULL */,
     team1_id INT NOT NULL REFERENCES tournament_teams(id) /* ON DELETE CASCADE */,
     team2_id INT NOT NULL REFERENCES tournament_teams(id) /* ON DELETE CASCADE */,
-    date TIMESTAMP NOT NULL,
+    match_dttm TIMESTAMP NOT NULL,
     score_team1 INT DEFAULT 0,
     score_team2 INT DEFAULT 0
 );
@@ -93,3 +93,10 @@ CREATE TABLE transfers (
     transfer_date DATE NOT NULL,
     transfer_type VARCHAR(50) CHECK (transfer_type IN ('Permanent', 'Loan', 'Free agent'))
 );
+
+
+INSERT INTO tournaments (tournament_nm, start_date) VALUES ('Test Tournament', '2025-03-23');
+INSERT INTO teams (team_nm, create_dt) VALUES ('Team A', '2025-03-23');
+INSERT INTO teams (team_nm, create_dt) VALUES ('Team B', '2025-03-23');
+INSERT INTO tournament_teams (tournament_id, team_id) VALUES (1, 1);
+INSERT INTO tournament_teams (tournament_id, team_id) VALUES (1, 2);
