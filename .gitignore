@@ -1,3 +1,7 @@
+db_secrets.txt
+useful_hints.txt
+generate_pass.ipynb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
