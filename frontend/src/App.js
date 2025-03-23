@@ -1,38 +1,49 @@
-// import logo from './logo.svg';
-// import './App.css';
-
-// function App() {
-//   return (
-//     <div className="App">
-//       <header className="App-header">
-//         <img src={logo} className="App-logo" alt="logo" />
-//         <p>
-//           Edit <code>src/App.js</code> and save to reload.
-//         </p>
-//         <a
-//           className="App-link"
-//           href="https://reactjs.org"
-//           target="_blank"
-//           rel="noopener noreferrer"
-//         >
-//           Learn React
-//         </a>
-//       </header>
-//     </div>
-//   );
-// }
-
-// export default App;
-
-import React from 'react';
-import CreateTournament from './main'; // Импорт твоего компонента из main.js
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Route, Routes, Link, Navigate } from 'react-router-dom';
+import MatchList from './components/MatchList';
+import MatchForm from './components/MatchForm';
+import Login from './components/Login';
 
 function App() {
+  const [token, setToken] = useState(localStorage.getItem('token') || '');
+
+  const handleLogin = (newToken) => {
+    setToken(newToken);
+    localStorage.setItem('token', newToken);
+  };
+
+  const handleLogout = () => {
+    setToken('');
+    localStorage.removeItem('token');
+  };
+
   return (
-    <div className="App">
-      <h1>My Tournament App</h1> {/* Опционально: заголовок приложения */}
-      <CreateTournament /> {/* Рендеринг твоего компонента */}
-    </div>
+    <Router>
+      <div>
+        <nav>
+          <ul>
+            <li><Link to="/">Matches</Link></li>
+            <li><Link to="/admin">Admin</Link></li>
+            {!token && <li><Link to="/login">Login</Link></li>}
+            {token && <li><button onClick={handleLogout}>Logout</button></li>}
+          </ul>
+        </nav>
+        <Routes>
+          <Route path="/" element={<MatchList token={token} />} />
+          <Route path="/login" element={<Login setToken={handleLogin} />} />
+          <Route 
+            path="/admin" 
+            element={
+              token ? (
+                <MatchForm token={token} setToken={handleLogin} />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 
