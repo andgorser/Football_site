@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/*
+  Цветовая схема задаётся CSS-переменными, а Tailwind получает их через
+  @theme inline. Благодаря этому классы вида bg-surface автоматически
+  меняются при переключении светлой и тёмной темы — без dark:-вариантов
+  на каждом элементе.
+*/
+
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --surface-3: #eaeef3;
+  --border: #dde2e9;
+  --fg: #10151c;
+  --fg-muted: #5f6b7a;
+  --fg-subtle: #8a94a3;
+  --brand: #1e56c8;
+  --brand-hover: #1a4bb0;
+  --brand-fg: #ffffff;
+  --brand-soft: #e4ecfb;
+  --live: #e11d48;
+  --live-soft: #fde8ec;
+  --win: #16a34a;
+  --draw: #94a3b8;
+  --loss: #dc2626;
+  --warning: #d97706;
+  --shadow: 0 1px 2px rgb(16 21 28 / 0.06), 0 1px 3px rgb(16 21 28 / 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1b2129;
+    --surface-3: #232a34;
+    --border: #2a323d;
+    --fg: #e6ecf3;
+    --fg-muted: #98a3b3;
+    --fg-subtle: #6e7a8a;
+    --brand: #5b8cff;
+    --brand-hover: #7aa2ff;
+    --brand-fg: #0d1117;
+    --brand-soft: #1a2440;
+    --live: #ff4d6a;
+    --live-soft: #3a1420;
+    --win: #35c46a;
+    --draw: #7c8795;
+    --loss: #f2544f;
+    --warning: #f0a83c;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-2: #1b2129;
+  --surface-3: #232a34;
+  --border: #2a323d;
+  --fg: #e6ecf3;
+  --fg-muted: #98a3b3;
+  --fg-subtle: #6e7a8a;
+  --brand: #5b8cff;
+  --brand-hover: #7aa2ff;
+  --brand-fg: #0d1117;
+  --brand-soft: #1a2440;
+  --live: #ff4d6a;
+  --live-soft: #3a1420;
+  --win: #35c46a;
+  --draw: #7c8795;
+  --loss: #f2544f;
+  --warning: #f0a83c;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+  --color-live: var(--live);
+  --color-live-soft: var(--live-soft);
+  --color-win: var(--win);
+  --color-draw: var(--draw);
+  --color-loss: var(--loss);
+  --color-warning: var(--warning);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Отступ снизу для мобильной панели навигации */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Пульсирующая точка «матч идёт сейчас» */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.live-dot {
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+
+/* Горизонтальные списки без видимой полосы прокрутки */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Аккуратные полосы прокрутки в таблицах */
+.thin-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

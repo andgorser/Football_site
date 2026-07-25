@@ -1,0 +1,424 @@
+// Схема базы данных сайта студенческого футбола МГУ.
+//
+// Ключевые принципы:
+//  * Единственный источник правды по событиям матча — таблица MatchEvent.
+//    Счёт в Match и вся статистика игроков пересчитываются из неё, поэтому
+//    данные не могут «разъехаться» после редактирования матча.
+//  * Заявка игрока привязана к паре «команда + турнир» (RosterEntry),
+//    а не к команде вообще — так игрок может за сезон сменить команду,
+//    и история прошлых турниров при этом не переписывается.
+//  * У матча есть статус, поэтому «не сыгран» и «0:0» — разные вещи.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Пользователи ───────────────────────────────
+
+enum Role {
+  ADMIN // организатор: может всё
+  REFEREE // судья: ведёт назначенные ему матчи
+  CAPTAIN // капитан: редактирует заявку своей команды
+  VIEWER // зритель: только чтение (аккаунт нужен не всем)
+}
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  passwordHash String
+  fullName     String
+  role         Role    @default(VIEWER)
+  isActive     Boolean @default(true)
+
+  // Капитан привязан к своей команде
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refereedMatches Match[]      @relation("MatchReferee")
+  createdEvents   MatchEvent[] @relation("EventAuthor")
+  auditLogs       AuditLog[]
+
+  @@index([role])
+}
+
+// Журнал изменений: кто, что и когда поменял. Для лиги это важнее,
+// чем кажется — всегда видно, кто правил результат после матча.
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String // "match.finish", "event.create", ...
+  entity    String // "Match", "MatchEvent", ...
+  entityId  String
+  summary   String // человекочитаемое описание
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────── Справочники ────────────────────────────────
+
+model Faculty {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // Механико-математический факультет
+  shortName String   @unique // Мехмат
+  teams     Team[]
+  players   Player[]
+}
+
+model Venue {
+  id      Int     @id @default(autoincrement())
+  name    String  @unique // Поле ГЗ, Манеж на Мичуринском
+  address String?
+  matches Match[]
+}
+
+// ─────────────────────────────── Турниры ────────────────────────────────────
+
+enum TournamentFormat {
+  LEAGUE // круговой турнир
+  GROUPS_PLAYOFF // группы + плей-офф
+  CUP // кубок на вылет
+}
+
+enum TournamentStatus {
+  UPCOMING
+  ONGOING
+  FINISHED
+}
+
+model Tournament {
+  id          Int              @id @default(autoincrement())
+  slug        String           @unique
+  name        String
+  season      String // "2025/26"
+  format      TournamentFormat @default(LEAGUE)
+  status      TournamentStatus @default(UPCOMING)
+  startDate   DateTime
+  endDate     DateTime?
+  description String?
+  logoUrl     String?
+
+  // Регламент: очки и продолжительность тайма (у студенческих лиг часто 2×30)
+  pointsForWin    Int @default(3)
+  pointsForDraw   Int @default(1)
+  pointsForLoss   Int @default(0)
+  halfDurationMin Int @default(45)
+
+  divisions Division[]
+  entries   TournamentTeam[]
+  matches   Match[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Дивизион / группа внутри турнира. Для простой лиги можно не создавать.
+model Division {
+  id           Int        @id @default(autoincrement())
+  tournamentId Int
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  name         String // "Высший дивизион", "Группа A"
+  sortOrder    Int        @default(0)
+
+  entries TournamentTeam[]
+  matches Match[]
+
+  // Сетка плей-офф ссылается на дивизион в духе «1-е место дивизиона А»
+  homeSourceOfMatches Match[] @relation("HomeSourceDivision")
+  awaySourceOfMatches Match[] @relation("AwaySourceDivision")
+
+  @@unique([tournamentId, name])
+}
+
+// ─────────────────────────────── Команды и игроки ───────────────────────────
+
+model Team {
+  id           String  @id @default(cuid())
+  slug         String  @unique
+  name         String
+  shortName    String
+  logoUrl      String?
+  primaryColor String? @default("#1f6feb")
+  foundedYear  Int?
+  description  String?
+
+  facultyId Int?
+  faculty   Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+
+  entries TournamentTeam[]
+  users   User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum MsuStatus {
+  STUDENT // студент
+  POSTGRAD // аспирант
+  ALUMNI // выпускник
+  STAFF // сотрудник
+  GUEST // не из МГУ
+}
+
+enum PlayerPosition {
+  GK // вратарь
+  DF // защитник
+  MF // полузащитник
+  FW // нападающий
+}
+
+model Player {
+  id         String    @id @default(cuid())
+  firstName  String
+  lastName   String
+  middleName String?
+  birthDate  DateTime? // возраст считается, а не хранится
+  photoUrl   String?
+
+  msuStatus         MsuStatus       @default(STUDENT)
+  facultyId         Int?
+  faculty           Faculty?        @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  course            Int?
+  preferredPosition PlayerPosition?
+
+  rosterEntries RosterEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastName])
+}
+
+// Заявка команды в турнир
+model TournamentTeam {
+  id           Int        @id @default(autoincrement())
+  tournamentId Int
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  teamId       String
+  team         Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  divisionId   Int?
+  division     Division?  @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+
+  // Снятые очки (техническое нарушение регламента и т.п.)
+  pointsAdjustment Int @default(0)
+
+  roster      RosterEntry[]
+  homeMatches Match[]       @relation("HomeTeam")
+  awayMatches Match[]       @relation("AwayTeam")
+  events      MatchEvent[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([tournamentId, teamId])
+  @@index([divisionId])
+}
+
+// Игрок, заявленный за команду в конкретном турнире
+model RosterEntry {
+  id               Int             @id @default(autoincrement())
+  tournamentTeamId Int
+  tournamentTeam   TournamentTeam  @relation(fields: [tournamentTeamId], references: [id], onDelete: Cascade)
+  playerId         String
+  player           Player          @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  shirtNumber      Int?
+  position         PlayerPosition?
+  isCaptain        Boolean         @default(false)
+  registeredAt     DateTime        @default(now())
+
+  lineups        MatchLineup[]
+  events         MatchEvent[]  @relation("EventPlayer")
+  assists        MatchEvent[]  @relation("EventAssist")
+  relatedInEvent MatchEvent[]  @relation("EventRelatedPlayer")
+
+  @@unique([tournamentTeamId, playerId])
+  @@unique([tournamentTeamId, shirtNumber])
+}
+
+// ─────────────────────────────── Матчи ──────────────────────────────────────
+
+enum MatchStatus {
+  SCHEDULED // назначен
+  FIRST_HALF // идёт первый тайм
+  HALF_TIME // перерыв
+  SECOND_HALF // идёт второй тайм
+  EXTRA_TIME // дополнительное время
+  PENALTY_SHOOTOUT // серия пенальти
+  FINISHED // завершён
+  POSTPONED // перенесён
+  CANCELLED // отменён
+  WALKOVER // техническое поражение
+}
+
+enum MatchStage {
+  REGULAR // регулярный чемпионат / групповой этап
+  PRELIMINARY // предварительный раунд плей-офф (стыки за выход дальше)
+  ROUND_OF_32
+  ROUND_OF_16
+  QUARTER_FINAL
+  SEMI_FINAL
+  THIRD_PLACE
+  FINAL
+}
+
+/// Откуда берётся участник матча плей-офф.
+/// TEAM — команда назначена напрямую, так живут все матчи регулярного этапа.
+enum MatchSlotSource {
+  TEAM // конкретная команда
+  DIVISION_PLACE // N-е место дивизиона
+  MATCH_WINNER // победитель другого матча
+  MATCH_LOSER // проигравший другого матча
+}
+
+model Match {
+  id           Int        @id @default(autoincrement())
+  tournamentId Int
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  divisionId   Int?
+  division     Division?  @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+
+  round Int? // номер тура
+  stage MatchStage @default(REGULAR)
+
+  /// Порядок матча внутри стадии — им управляет организатор в конструкторе сетки
+  bracketOrder Int @default(0)
+
+  // Участники. В плей-офф команда неизвестна, пока не определится источник,
+  // поэтому поля необязательные. Инвариант «у матча с источником TEAM команда
+  // обязана быть» держится CHECK-ограничением Match_team_source_filled.
+  homeTeamId Int?
+  homeTeam   TournamentTeam? @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)
+  awayTeamId Int?
+  awayTeam   TournamentTeam? @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
+
+  // ── Откуда придёт участник: хозяева ───────────────────────────────────────
+  homeSource           MatchSlotSource @default(TEAM)
+  homeSourceDivisionId Int?
+  homeSourceDivision   Division?       @relation("HomeSourceDivision", fields: [homeSourceDivisionId], references: [id], onDelete: SetNull)
+  homeSourcePlace      Int? // 1 = победитель дивизиона
+  homeSourceMatchId    Int?
+  homeSourceMatch      Match?          @relation("HomeSourceMatch", fields: [homeSourceMatchId], references: [id], onDelete: SetNull)
+  /// Своя подпись слота, если правила сезона не описываются источником
+  homeSourceLabel      String?
+
+  // ── Откуда придёт участник: гости ─────────────────────────────────────────
+  awaySource           MatchSlotSource @default(TEAM)
+  awaySourceDivisionId Int?
+  awaySourceDivision   Division?       @relation("AwaySourceDivision", fields: [awaySourceDivisionId], references: [id], onDelete: SetNull)
+  awaySourcePlace      Int?
+  awaySourceMatchId    Int?
+  awaySourceMatch      Match?          @relation("AwaySourceMatch", fields: [awaySourceMatchId], references: [id], onDelete: SetNull)
+  awaySourceLabel      String?
+
+  // Кому этот матч отдаёт своего победителя или проигравшего
+  feedsHomeOf Match[] @relation("HomeSourceMatch")
+  feedsAwayOf Match[] @relation("AwaySourceMatch")
+
+  kickoffAt DateTime
+  venueId   Int?
+  venue     Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
+
+  refereeId String?
+  referee   User?   @relation("MatchReferee", fields: [refereeId], references: [id], onDelete: SetNull)
+
+  status MatchStatus @default(SCHEDULED)
+
+  // Счёт пересчитывается из событий; null означает «матч ещё не игрался».
+  homeScore         Int?
+  awayScore         Int?
+  // Серия пенальти (для плей-офф)
+  homeShootoutScore Int?
+  awayShootoutScore Int?
+
+  // Часы матча: когда начался текущий тайм и сколько минут прошло до него.
+  periodStartedAt DateTime?
+  clockOffsetSec  Int       @default(0)
+
+  notes String?
+
+  lineups MatchLineup[]
+  events  MatchEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tournamentId, kickoffAt])
+  @@index([tournamentId, stage, bracketOrder])
+  @@index([homeSourceMatchId])
+  @@index([awaySourceMatchId])
+  @@index([status])
+  @@index([kickoffAt])
+}
+
+// Состав на конкретный матч
+model MatchLineup {
+  id            Int             @id @default(autoincrement())
+  matchId       Int
+  match         Match           @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  rosterEntryId Int
+  rosterEntry   RosterEntry     @relation(fields: [rosterEntryId], references: [id], onDelete: Cascade)
+  isStarting    Boolean         @default(true)
+  shirtNumber   Int?
+  position      PlayerPosition?
+
+  @@unique([matchId, rosterEntryId])
+  @@index([matchId])
+}
+
+enum MatchEventType {
+  GOAL // гол с игры
+  PENALTY_GOAL // гол с пенальти
+  OWN_GOAL // автогол (записывается на команду, в чьи ворота НЕ забили)
+  PENALTY_MISSED // нереализованный пенальти
+  YELLOW_CARD
+  SECOND_YELLOW_CARD // вторая жёлтая (равна удалению)
+  RED_CARD
+  SUBSTITUTION // playerId — вышел, relatedPlayerId — ушёл
+}
+
+model MatchEvent {
+  id      Int   @id @default(autoincrement())
+  matchId Int
+  match   Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  type        MatchEventType
+  minute      Int // игровая минута
+  extraMinute Int? // добавленное время: 45+2 → minute=45, extraMinute=2
+
+  // Команда, к которой относится событие (для автогола — команда автора)
+  tournamentTeamId Int
+  tournamentTeam   TournamentTeam @relation(fields: [tournamentTeamId], references: [id], onDelete: Cascade)
+
+  playerId Int?
+  player   RosterEntry? @relation("EventPlayer", fields: [playerId], references: [id], onDelete: SetNull)
+
+  assistPlayerId Int?
+  assistPlayer   RosterEntry? @relation("EventAssist", fields: [assistPlayerId], references: [id], onDelete: SetNull)
+
+  // Для замены — игрок, который ушёл с поля
+  relatedPlayerId Int?
+  relatedPlayer   RosterEntry? @relation("EventRelatedPlayer", fields: [relatedPlayerId], references: [id], onDelete: SetNull)
+
+  note String?
+
+  createdById String?
+  createdBy   User?   @relation("EventAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([matchId, minute])
+  @@index([playerId])
+}
