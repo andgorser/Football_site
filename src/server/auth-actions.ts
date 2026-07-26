@@ -20,7 +20,10 @@ export async function loginAction(
   const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-    next: formData.get("next"),
+    // Скрытого поля next нет, когда на страницу входа зашли сами, а не были
+    // на неё переброшены. formData.get вернёт null, а схема ждёт «строку или
+    // ничего» — поэтому null приводим к undefined.
+    next: formData.get("next") ?? undefined,
   });
 
   if (!parsed.success) {
