@@ -106,6 +106,28 @@ type SlotData = {
 };
 
 /** Проверяет одну сторону матча и приводит её к полям базы. */
+/**
+ * Сколько команд в дивизионе.
+ *
+ * У дивизиона, разделённого на половины, заявок уже не осталось — команды
+ * уехали к потомкам. Но его таблица жива (она строится по сыгранным матчам),
+ * и слот «1-е место первого этапа» обязан продолжать работать.
+ */
+async function divisionSize(divisionId: number, entryCount: number): Promise<number> {
+  if (entryCount > 0) return entryCount;
+
+  const matches = await prisma.match.findMany({
+    where: { divisionId },
+    select: { homeTeamId: true, awayTeamId: true },
+  });
+  const teams = new Set<number>();
+  for (const match of matches) {
+    if (match.homeTeamId !== null) teams.add(match.homeTeamId);
+    if (match.awayTeamId !== null) teams.add(match.awayTeamId);
+  }
+  return teams.size;
+}
+
 async function buildSlot(
   input: SlotInput,
   context: { tournamentId: number; matchId: number | null; sideName: string },
@@ -138,10 +160,11 @@ async function buildSlot(
     if (!Number.isInteger(place) || place < 1) {
       return { ok: false, error: `${sideName}: укажите место числом, начиная с 1` };
     }
-    if (place > division._count.entries) {
+    const size = await divisionSize(division.id, division._count.entries);
+    if (place > size) {
       return {
         ok: false,
-        error: `${sideName}: в дивизионе «${division.name}» всего ${division._count.entries} команд`,
+        error: `${sideName}: в дивизионе «${division.name}» всего ${size} команд`,
       };
     }
     return {

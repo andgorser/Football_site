@@ -5,7 +5,7 @@ import { ActionForm } from "@/components/admin/ActionForm";
 import { MatchFields } from "@/components/admin/MatchFields";
 import { Card, CardHeader, PageTitle, buttonClass } from "@/components/ui";
 import { MATCH_STATUS_LABEL } from "@/lib/football";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTimeOrTbd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { saveMatch } from "@/server/admin-actions";
 
@@ -26,6 +26,7 @@ export default async function AdminMatchPage({ params }: { params: Promise<{ id:
       homeTeamId: true,
       awayTeamId: true,
       kickoffAt: true,
+      kickoffTbd: true,
       venueId: true,
       refereeId: true,
       round: true,
@@ -82,7 +83,7 @@ export default async function AdminMatchPage({ params }: { params: Promise<{ id:
       <Card>
         <CardHeader
           title="Текущее состояние"
-          subtitle={`${MATCH_STATUS_LABEL[match.status]} · ${formatDateTime(match.kickoffAt)}`}
+          subtitle={`${MATCH_STATUS_LABEL[match.status]} · ${formatDateTimeOrTbd(match.kickoffAt, match.kickoffTbd)}`}
         />
         <div className="px-4 py-3 text-sm text-muted">
           Счёт:{" "}
@@ -113,6 +114,7 @@ export default async function AdminMatchPage({ params }: { params: Promise<{ id:
                 homeTeamId: match.homeTeamId,
                 awayTeamId: match.awayTeamId,
                 kickoffAt: match.kickoffAt,
+                kickoffTbd: match.kickoffTbd,
                 venueId: match.venueId,
                 refereeId: match.refereeId,
                 round: match.round,

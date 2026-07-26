@@ -13,7 +13,7 @@ import {
 } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { LIVE_STATUSES, MATCH_STATUS_LABEL, OPEN_STATUSES, isLive } from "@/lib/football";
-import { formatDayLabel, formatTime, moscowDayKey, moscowDayRange } from "@/lib/format";
+import { formatDayLabel, formatTimeOrTbd, moscowDayKey, moscowDayRange } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { awaySlotOf, homeSlotOf, slotLabel } from "@/lib/playoff";
 
@@ -157,6 +157,7 @@ const listArgs = {
   select: {
     id: true,
     kickoffAt: true,
+    kickoffTbd: true,
     status: true,
     round: true,
     refereeId: true,
@@ -213,7 +214,8 @@ function MatchLinks({
                 <span className="truncate text-sm font-medium">{match.awayTeam?.team.shortName ?? slotLabel(awaySlotOf(match))}</span>
               </div>
               <p className="mt-1 truncate text-xs text-muted">
-                {formatDayLabel(match.kickoffAt)}, {formatTime(match.kickoffAt)}
+                {formatDayLabel(match.kickoffAt)},{" "}
+                {formatTimeOrTbd(match.kickoffAt, match.kickoffTbd)}
                 {match.venue ? ` · ${match.venue.name}` : ""}
               </p>
               {match.notes ? (

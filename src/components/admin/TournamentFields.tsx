@@ -1,9 +1,12 @@
+import Link from "next/link";
+
 import { Field, inputClass } from "@/components/ui";
 import { toDateInput } from "@/lib/format";
 
 export type TournamentDefaults = {
   name: string;
   season: string;
+  seriesId: number | null;
   format: string;
   status: string;
   startDate: Date;
@@ -21,7 +24,14 @@ const currentSeason = (() => {
 })();
 
 /** Поля формы турнира — общие для создания и редактирования. */
-export function TournamentFields({ defaults }: { defaults?: TournamentDefaults }) {
+export function TournamentFields({
+  defaults,
+  seriesOptions = [],
+}: {
+  defaults?: TournamentDefaults;
+  /** Серии, в которые можно включить турнир */
+  seriesOptions?: { id: number; name: string }[];
+}) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
@@ -44,6 +54,26 @@ export function TournamentFields({ defaults }: { defaults?: TournamentDefaults }
           placeholder="2025/26"
           className={inputClass}
         />
+      </Field>
+
+      <Field label="Серия" hint="Связывает сезоны одного турнира в одну историю">
+        {seriesOptions.length > 0 ? (
+          <select name="seriesId" defaultValue={defaults?.seriesId ?? ""} className={inputClass}>
+            <option value="">Без серии</option>
+            {seriesOptions.map((series) => (
+              <option key={series.id} value={series.id}>
+                {series.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-sm text-muted">
+            Серий пока нет —{" "}
+            <Link href="/admin/series" className="text-brand hover:underline">
+              создайте первую
+            </Link>
+          </p>
+        )}
       </Field>
 
       <Field label="Формат">

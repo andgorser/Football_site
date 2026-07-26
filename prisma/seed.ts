@@ -4,9 +4,20 @@
  *   npm run db:seed
  *
  * Скрипт полностью очищает таблицы и создаёт заново: факультеты, команды,
- * игроков, чемпионат с двумя дивизионами и кубок. Часть туров «сыграна»
- * со всеми событиями, один матч идёт прямо сейчас, остальные впереди —
- * так сайт выглядит живым сразу после установки.
+ * игроков, текущий сезон и архив прошлых.
+ *
+ * Текущий сезон живой: часть туров сыграна со всеми событиями, один матч идёт
+ * прямо сейчас, остальные впереди, плюс заранее собранная сетка плей-офф.
+ *
+ * Архив показывает все поддерживаемые схемы проведения, каждая доиграна:
+ *
+ *   • прошлый сезон чемпионата — дивизионы плюс плей-офф за титул, даёт серии
+ *     вторую строку в истории и настоящего чемпиона;
+ *   • «Лига МГУ» — круговой этап на 12 команд с делением на топ-6 и места
+ *     7–12, очки первого этапа перенесены;
+ *   • «Первенство МГУ» — два дивизиона в два круга (обычный формат);
+ *   • «Зимний кубок» — две группы плюс плей-офф с финалом по пенальти;
+ *   • «Турнир первокурсников» — одна группа, один круг, без плей-офф.
  *
  * Расписание строится относительно текущей даты, поэтому данные не
  * протухают, когда бы вы ни запустили скрипт.
@@ -181,6 +192,22 @@ function saturdayOffsetWeeks(base: Date, weeks: number): Date {
   return d;
 }
 
+/** Сезон в привычном виде: 2024/25. */
+function seasonLabel(startYear: number): string {
+  return `${startYear}/${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+/** Одиннадцать в стартовом составе: 1 вратарь, 4 защитника, 4 полузащитника, 2 нападающих. */
+function startingEleven(roster: RosterPlayer[]): RosterPlayer[] {
+  const byPosition = (p: PlayerPosition) => roster.filter((r) => r.position === p);
+  return [
+    ...byPosition("GK").slice(0, 1),
+    ...byPosition("DF").slice(0, 4),
+    ...byPosition("MF").slice(0, 4),
+    ...byPosition("FW").slice(0, 2),
+  ];
+}
+
 // ───────────────────────────── Основной сценарий ────────────────────────────
 
 async function main() {
@@ -198,6 +225,7 @@ async function main() {
   await prisma.tournamentTeam.deleteMany();
   await prisma.division.deleteMany();
   await prisma.tournament.deleteMany();
+  await prisma.tournamentSeries.deleteMany();
   await prisma.player.deleteMany();
   await prisma.user.deleteMany();
   await prisma.team.deleteMany();
@@ -211,12 +239,17 @@ async function main() {
     faculties.set(f.shortName, created.id);
   }
 
-  const venues = [];
+  // Типы указаны явно: ниже эти массивы читают вложенные функции, и без
+  // аннотации TypeScript не успевает вывести тип к моменту их объявления.
+  const venues: { id: number }[] = [];
   for (const v of VENUES) venues.push(await prisma.venue.create({ data: v }));
 
   console.log("Создаю команды и игроков…");
   const allTeamDefs = [...TOP_TEAMS, ...SECOND_TEAMS];
-  const teams = [];
+  const teams: Array<{
+    team: { id: string; slug: string };
+    players: { id: string; firstName: string; lastName: string; preferredPosition: PlayerPosition | null }[];
+  }> = [];
   const usedNames = new Set<string>();
 
   for (const def of allTeamDefs) {
@@ -262,7 +295,7 @@ async function main() {
       );
     }
 
-    teams.push({ team, def, players });
+    teams.push({ team, players });
   }
 
   console.log("Создаю пользователей…");
@@ -275,7 +308,7 @@ async function main() {
     },
   });
 
-  const referees = [];
+  const referees: { id: string }[] = [];
   const refereeNames = [
     "Сергей Волошин",
     "Артём Кравцов",
@@ -317,15 +350,315 @@ async function main() {
     },
   });
 
+  // ─────────────── Помощники для архивных (полностью сыгранных) турниров ────
+  // Они пишут пакетно и кладут в состав только стартовую одиннадцатку: архиву
+  // не нужна детальность живого сезона, зато сид остаётся быстрым.
+
+  type Entry = { id: number; players: RosterPlayer[] };
+
+  /** Заявляет команды в турнир вместе с составами. */
+  async function enterTeams(
+    tournamentId: number,
+    teamDefs: readonly { name: string }[],
+    divisionId: number | null,
+  ): Promise<Entry[]> {
+    const result: Entry[] = [];
+
+    for (const def of teamDefs) {
+      const slug = slugify(def.name);
+      const source = teams.find((t) => t.team.slug === slug)!;
+
+      const entry = await prisma.tournamentTeam.create({
+        data: { tournamentId, teamId: source.team.id, divisionId },
+      });
+      await prisma.rosterEntry.createMany({
+        data: source.players.map((player, i) => ({
+          tournamentTeamId: entry.id,
+          playerId: player.id,
+          shirtNumber: i === 0 ? 1 : i + 1,
+          position: player.preferredPosition,
+          isCaptain: i === 7,
+        })),
+      });
+
+      const roster = await prisma.rosterEntry.findMany({
+        where: { tournamentTeamId: entry.id },
+        orderBy: { id: "asc" },
+        select: { id: true, position: true, shirtNumber: true },
+      });
+
+      result.push({
+        id: entry.id,
+        players: roster.map((r) => ({
+          id: r.id,
+          position: r.position ?? "MF",
+          shirtNumber: r.shirtNumber,
+        })),
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * «Доигрывает» матч: составы, голы, карточки и счёт из событий.
+   *
+   * Счёт не проставляется руками — он, как и на боевом сайте, выводится из
+   * событий через scoreFromEvents. В матче на вылет ничья недопустима,
+   * поэтому при равном счёте дописывается серия пенальти.
+   */
+  async function finishMatch(
+    matchId: number,
+    home: Entry,
+    away: Entry,
+    options: { halfDuration: number; authorId: string; knockout?: boolean },
+  ): Promise<void> {
+    const fullTime = options.halfDuration * 2;
+
+    await prisma.matchLineup.createMany({
+      data: [home, away].flatMap((side) =>
+        startingEleven(side.players).map((player) => ({
+          matchId,
+          rosterEntryId: player.id,
+          isStarting: true,
+          shirtNumber: player.shirtNumber,
+          position: player.position,
+        })),
+      ),
+    });
+
+    const events: Array<{
+      matchId: number;
+      type: MatchEventType;
+      minute: number;
+      tournamentTeamId: number;
+      playerId: number;
+      assistPlayerId: number | null;
+      createdById: string;
+    }> = [];
+
+    const scorerWeights: Record<PlayerPosition, number> = { GK: 0, DF: 1, MF: 3, FW: 5 };
+
+    function addGoals(side: Entry, count: number) {
+      const pool = side.players.flatMap((p) => Array(scorerWeights[p.position]).fill(p) as RosterPlayer[]);
+      for (let i = 0; i < count; i++) {
+        const scorer = pool.length ? pick(pool) : side.players[0];
+        const others = side.players.filter((p) => p.id !== scorer.id);
+        const assistant = chance(0.5) ? pick(others) : null;
+        events.push({
+          matchId,
+          type: chance(0.1) ? "PENALTY_GOAL" : "GOAL",
+          minute: randomInt(1, fullTime),
+          tournamentTeamId: side.id,
+          playerId: scorer.id,
+          assistPlayerId: assistant?.id ?? null,
+          createdById: options.authorId,
+        });
+      }
+    }
+
+    addGoals(home, randomInt(0, 4));
+    addGoals(away, Math.max(0, randomInt(0, 4) - (chance(0.35) ? 1 : 0)));
+
+    for (const side of [home, away]) {
+      for (let i = 0; i < randomInt(0, 2); i++) {
+        events.push({
+          matchId,
+          type: "YELLOW_CARD",
+          minute: randomInt(5, fullTime),
+          tournamentTeamId: side.id,
+          playerId: pick(side.players).id,
+          assistPlayerId: null,
+          createdById: options.authorId,
+        });
+      }
+    }
+
+    await prisma.matchEvent.createMany({ data: events });
+
+    const score = scoreFromEvents(events, home.id, away.id);
+    const draw = score.home === score.away;
+    const shootoutHome = randomInt(3, 5);
+
+    await prisma.match.update({
+      where: { id: matchId },
+      data: {
+        status: "FINISHED",
+        homeScore: score.home,
+        awayScore: score.away,
+        ...(options.knockout && draw
+          ? {
+              homeShootoutScore: shootoutHome,
+              awayShootoutScore: chance(0.5) ? shootoutHome - 1 : shootoutHome + 1,
+            }
+          : {}),
+      },
+    });
+  }
+
+  /** Круговой этап целиком: создаёт матчи и сразу их доигрывает. */
+  async function playRoundRobinStage(params: {
+    tournamentId: number;
+    divisionId: number | null;
+    entries: Entry[];
+    /** Сколько недель назад проходит первый тур */
+    weeksAgo: number;
+    circles?: number;
+    startRound?: number;
+    halfDuration: number;
+  }): Promise<void> {
+    const rounds = roundRobin(params.entries.map((e) => e.id));
+    const byId = new Map(params.entries.map((e) => [e.id, e]));
+    const circles = params.circles ?? 1;
+    let roundNumber = params.startRound ?? 1;
+    let weekOffset = 0;
+
+    for (let circle = 0; circle < circles; circle++) {
+      for (const round of rounds) {
+        const roundDate = saturdayOffsetWeeks(now, params.weeksAgo + weekOffset);
+
+        for (let matchIndex = 0; matchIndex < round.length; matchIndex++) {
+          // Во втором круге команды меняются полями — как в настоящей лиге
+          const [first, second] = round[matchIndex];
+          const homeId = circle % 2 === 0 ? first : second;
+          const awayId = circle % 2 === 0 ? second : first;
+
+          const match = await prisma.match.create({
+            data: {
+              tournamentId: params.tournamentId,
+              divisionId: params.divisionId,
+              round: roundNumber,
+              homeTeamId: homeId,
+              awayTeamId: awayId,
+              kickoffAt: new Date(roundDate.getTime() + matchIndex * 2 * 60 * 60 * 1000),
+              venueId: venues[matchIndex % venues.length].id,
+              refereeId: referees[(roundNumber + matchIndex) % referees.length].id,
+            },
+            select: { id: true },
+          });
+
+          await finishMatch(match.id, byId.get(homeId)!, byId.get(awayId)!, {
+            halfDuration: params.halfDuration,
+            authorId: referees[(roundNumber + matchIndex) % referees.length].id,
+          });
+        }
+
+        roundNumber++;
+        weekOffset++;
+      }
+    }
+  }
+
+  /** Матч на вылет с известными участниками. */
+  async function playKnockout(params: {
+    tournamentId: number;
+    stage: "SEMI_FINAL" | "FINAL" | "THIRD_PLACE";
+    bracketOrder?: number;
+    home: Entry;
+    away: Entry;
+    weeksAgo: number;
+    hourOffset?: number;
+    halfDuration: number;
+  }): Promise<Entry> {
+    const match = await prisma.match.create({
+      data: {
+        tournamentId: params.tournamentId,
+        stage: params.stage,
+        bracketOrder: params.bracketOrder ?? 0,
+        homeTeamId: params.home.id,
+        awayTeamId: params.away.id,
+        kickoffAt: new Date(
+          saturdayOffsetWeeks(now, params.weeksAgo).getTime() +
+            (params.hourOffset ?? 0) * 60 * 60 * 1000,
+        ),
+        venueId: venues[0].id,
+        refereeId: referees[0].id,
+      },
+      select: { id: true },
+    });
+
+    await finishMatch(match.id, params.home, params.away, {
+      halfDuration: params.halfDuration,
+      authorId: referees[0].id,
+      knockout: true,
+    });
+
+    const played = await prisma.match.findUniqueOrThrow({
+      where: { id: match.id },
+      select: { homeScore: true, awayScore: true, homeShootoutScore: true, awayShootoutScore: true },
+    });
+
+    const homeWon =
+      played.homeScore! > played.awayScore! ||
+      (played.homeScore === played.awayScore &&
+        (played.homeShootoutScore ?? 0) > (played.awayShootoutScore ?? 0));
+    return homeWon ? params.home : params.away;
+  }
+
+  /** Порядок команд дивизиона по итогам сыгранного этапа. */
+  async function orderByStandings(
+    tournamentId: number,
+    divisionId: number | null,
+    entries: Entry[],
+  ): Promise<Entry[]> {
+    const matches = await prisma.match.findMany({
+      where: { tournamentId, divisionId, stage: "REGULAR", status: "FINISHED" },
+      select: { homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true },
+    });
+
+    const table = new Map(
+      entries.map((e) => [e.id, { entry: e, points: 0, diff: 0, scored: 0 }]),
+    );
+
+    for (const m of matches) {
+      const home = table.get(m.homeTeamId!);
+      const away = table.get(m.awayTeamId!);
+      if (!home || !away || m.homeScore === null || m.awayScore === null) continue;
+
+      home.scored += m.homeScore;
+      away.scored += m.awayScore;
+      home.diff += m.homeScore - m.awayScore;
+      away.diff += m.awayScore - m.homeScore;
+
+      if (m.homeScore > m.awayScore) home.points += 3;
+      else if (m.homeScore < m.awayScore) away.points += 3;
+      else {
+        home.points += 1;
+        away.points += 1;
+      }
+    }
+
+    return [...table.values()]
+      .sort((a, b) => b.points - a.points || b.diff - a.diff || b.scored - a.scored)
+      .map((row) => row.entry);
+  }
+
   console.log("Создаю чемпионат…");
   const seasonStartYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-  const season = `${seasonStartYear}/${String((seasonStartYear + 1) % 100).padStart(2, "0")}`;
+  const season = seasonLabel(seasonStartYear);
+
+  // Серии живут дольше сезона: к ним будут привязываться турниры следующих лет
+  const championshipSeries = await prisma.tournamentSeries.create({
+    data: {
+      slug: "chempionat-mgu",
+      name: "Чемпионат МГУ по футболу",
+      description: "Главный турнир сезона среди сборных факультетов",
+    },
+  });
+  const cupSeries = await prisma.tournamentSeries.create({
+    data: {
+      slug: "kubok-mgu",
+      name: "Кубок МГУ",
+      description: "Кубковый турнир на выбывание",
+    },
+  });
 
   const championship = await prisma.tournament.create({
     data: {
       slug: `chempionat-mgu-${seasonStartYear}`,
       name: "Чемпионат МГУ по футболу",
       season,
+      seriesId: championshipSeries.id,
       format: "LEAGUE",
       status: "ONGOING",
       startDate: saturdayOffsetWeeks(now, -5),
@@ -433,6 +766,7 @@ async function main() {
       slug: `kubok-mgu-${seasonStartYear}`,
       name: "Кубок МГУ",
       season,
+      seriesId: cupSeries.id,
       format: "CUP",
       status: "UPCOMING",
       startDate: saturdayOffsetWeeks(now, 4),
@@ -598,6 +932,335 @@ async function main() {
       awaySource: "MATCH_WINNER",
       awaySourceMatchId: championshipSemis[1].id,
     },
+  });
+
+  // ───────────────────────── Архив: завершённые турниры ─────────────────────
+  // Пять разных форматов, все доиграны до конца. Нужны, чтобы сразу после
+  // установки было видно, как выглядит история: сезоны прошлых лет, чемпионы,
+  // статистика за несколько лет и все поддерживаемые схемы проведения.
+
+  console.log("Создаю прошлый сезон чемпионата…");
+  const prevChampionship = await prisma.tournament.create({
+    data: {
+      slug: `chempionat-mgu-${seasonStartYear - 1}`,
+      name: "Чемпионат МГУ по футболу",
+      season: seasonLabel(seasonStartYear - 1),
+      seriesId: championshipSeries.id,
+      format: "LEAGUE",
+      status: "FINISHED",
+      startDate: saturdayOffsetWeeks(now, -57),
+      endDate: saturdayOffsetWeeks(now, -45),
+      halfDurationMin: 30,
+      description:
+        "Прошлый сезон: два дивизиона, круговой этап и общий плей-офф за титул.",
+    },
+  });
+
+  const prevTop = await prisma.division.create({
+    data: { tournamentId: prevChampionship.id, name: "Высший дивизион", sortOrder: 1 },
+  });
+  const prevFirst = await prisma.division.create({
+    data: { tournamentId: prevChampionship.id, name: "Первый дивизион", sortOrder: 2 },
+  });
+
+  const prevTopEntries = await enterTeams(prevChampionship.id, TOP_TEAMS, prevTop.id);
+  const prevFirstEntries = await enterTeams(prevChampionship.id, SECOND_TEAMS, prevFirst.id);
+
+  await playRoundRobinStage({
+    tournamentId: prevChampionship.id,
+    divisionId: prevTop.id,
+    entries: prevTopEntries,
+    weeksAgo: -57,
+    halfDuration: 30,
+  });
+  await playRoundRobinStage({
+    tournamentId: prevChampionship.id,
+    divisionId: prevFirst.id,
+    entries: prevFirstEntries,
+    weeksAgo: -57,
+    halfDuration: 30,
+  });
+
+  // Плей-офф прошлого сезона: победители дивизионов и вторые места
+  const prevTopOrder = await orderByStandings(prevChampionship.id, prevTop.id, prevTopEntries);
+  const prevFirstOrder = await orderByStandings(prevChampionship.id, prevFirst.id, prevFirstEntries);
+
+  const prevSemiA = await playKnockout({
+    tournamentId: prevChampionship.id,
+    stage: "SEMI_FINAL",
+    bracketOrder: 0,
+    home: prevTopOrder[0],
+    away: prevFirstOrder[1],
+    weeksAgo: -47,
+    halfDuration: 30,
+  });
+  const prevSemiB = await playKnockout({
+    tournamentId: prevChampionship.id,
+    stage: "SEMI_FINAL",
+    bracketOrder: 1,
+    home: prevFirstOrder[0],
+    away: prevTopOrder[1],
+    weeksAgo: -47,
+    hourOffset: 2,
+    halfDuration: 30,
+  });
+
+  const prevFinalists = [prevTopOrder[0], prevFirstOrder[1], prevFirstOrder[0], prevTopOrder[1]];
+  const prevLosers = prevFinalists.filter((e) => e !== prevSemiA && e !== prevSemiB);
+
+  await playKnockout({
+    tournamentId: prevChampionship.id,
+    stage: "THIRD_PLACE",
+    home: prevLosers[0],
+    away: prevLosers[1],
+    weeksAgo: -45,
+    halfDuration: 30,
+  });
+  await playKnockout({
+    tournamentId: prevChampionship.id,
+    stage: "FINAL",
+    home: prevSemiA,
+    away: prevSemiB,
+    weeksAgo: -45,
+    hourOffset: 3,
+    halfDuration: 30,
+  });
+
+  console.log("Создаю лигу с делением на топ-6 и 7–12…");
+  const splitLeague = await prisma.tournament.create({
+    data: {
+      slug: `liga-mgu-${seasonStartYear - 2}`,
+      name: "Лига МГУ",
+      season: seasonLabel(seasonStartYear - 2),
+      format: "LEAGUE",
+      status: "FINISHED",
+      startDate: saturdayOffsetWeeks(now, -105),
+      endDate: saturdayOffsetWeeks(now, -88),
+      halfDurationMin: 25,
+      description:
+        "Двенадцать команд играют круговой турнир, затем делятся пополам: топ-6 спорит за медали, места 7–12 — за выживание. Очки первого этапа сохраняются.",
+    },
+  });
+
+  const splitTeams = [...TOP_TEAMS, ...SECOND_TEAMS].slice(0, 12);
+  const splitStageOne = await prisma.division.create({
+    data: { tournamentId: splitLeague.id, name: "Общий этап", sortOrder: 1 },
+  });
+  const splitEntries = await enterTeams(splitLeague.id, splitTeams, splitStageOne.id);
+
+  await playRoundRobinStage({
+    tournamentId: splitLeague.id,
+    divisionId: splitStageOne.id,
+    entries: splitEntries,
+    weeksAgo: -105,
+    halfDuration: 25,
+  });
+
+  // Разделение по итогам — ровно то, что делает кнопка «Разделить по итогам»
+  const splitOrder = await orderByStandings(splitLeague.id, splitStageOne.id, splitEntries);
+  await prisma.division.update({
+    where: { id: splitStageOne.id },
+    data: { name: "Первый этап" },
+  });
+
+  const topSix = await prisma.division.create({
+    data: {
+      tournamentId: splitLeague.id,
+      name: "Топ-6",
+      sortOrder: 2,
+      parentDivisionId: splitStageOne.id,
+    },
+  });
+  const bottomSix = await prisma.division.create({
+    data: {
+      tournamentId: splitLeague.id,
+      name: "Места 7–12",
+      sortOrder: 3,
+      parentDivisionId: splitStageOne.id,
+    },
+  });
+
+  await prisma.tournamentTeam.updateMany({
+    where: { id: { in: splitOrder.slice(0, 6).map((e) => e.id) } },
+    data: { divisionId: topSix.id },
+  });
+  await prisma.tournamentTeam.updateMany({
+    where: { id: { in: splitOrder.slice(6).map((e) => e.id) } },
+    data: { divisionId: bottomSix.id },
+  });
+
+  await playRoundRobinStage({
+    tournamentId: splitLeague.id,
+    divisionId: topSix.id,
+    entries: splitOrder.slice(0, 6),
+    weeksAgo: -93,
+    startRound: 12,
+    halfDuration: 25,
+  });
+  await playRoundRobinStage({
+    tournamentId: splitLeague.id,
+    divisionId: bottomSix.id,
+    entries: splitOrder.slice(6),
+    weeksAgo: -93,
+    startRound: 12,
+    halfDuration: 25,
+  });
+
+  console.log("Создаю первенство с двумя кругами…");
+  const doubleRound = await prisma.tournament.create({
+    data: {
+      slug: `pervenstvo-mgu-${seasonStartYear - 2}`,
+      name: "Первенство МГУ",
+      season: seasonLabel(seasonStartYear - 2),
+      format: "LEAGUE",
+      status: "FINISHED",
+      startDate: saturdayOffsetWeeks(now, -80),
+      endDate: saturdayOffsetWeeks(now, -70),
+      halfDurationMin: 30,
+      description:
+        "Два дивизиона, обычный формат в два круга: каждый играет с каждым дома и в гостях.",
+    },
+  });
+
+  const doubleTop = await prisma.division.create({
+    data: { tournamentId: doubleRound.id, name: "Дивизион А", sortOrder: 1 },
+  });
+  const doubleBottom = await prisma.division.create({
+    data: { tournamentId: doubleRound.id, name: "Дивизион Б", sortOrder: 2 },
+  });
+
+  const doubleTopEntries = await enterTeams(doubleRound.id, TOP_TEAMS.slice(0, 6), doubleTop.id);
+  const doubleBottomEntries = await enterTeams(
+    doubleRound.id,
+    SECOND_TEAMS.slice(0, 6),
+    doubleBottom.id,
+  );
+
+  await playRoundRobinStage({
+    tournamentId: doubleRound.id,
+    divisionId: doubleTop.id,
+    entries: doubleTopEntries,
+    weeksAgo: -80,
+    circles: 2,
+    halfDuration: 30,
+  });
+  await playRoundRobinStage({
+    tournamentId: doubleRound.id,
+    divisionId: doubleBottom.id,
+    entries: doubleBottomEntries,
+    weeksAgo: -80,
+    circles: 2,
+    halfDuration: 30,
+  });
+
+  console.log("Создаю турнир с группами и плей-офф…");
+  const groupsPlayoff = await prisma.tournament.create({
+    data: {
+      slug: `zimniy-kubok-${seasonStartYear - 1}`,
+      name: "Зимний кубок МГУ",
+      season: seasonLabel(seasonStartYear - 1),
+      format: "GROUPS_PLAYOFF",
+      status: "FINISHED",
+      startDate: saturdayOffsetWeeks(now, -34),
+      endDate: saturdayOffsetWeeks(now, -28),
+      halfDurationMin: 20,
+      description:
+        "Две группы по четыре команды, из каждой в полуфинал выходят по две. Формат «группы + плей-офф».",
+    },
+  });
+
+  const groupA = await prisma.division.create({
+    data: { tournamentId: groupsPlayoff.id, name: "Группа A", sortOrder: 1 },
+  });
+  const groupB = await prisma.division.create({
+    data: { tournamentId: groupsPlayoff.id, name: "Группа B", sortOrder: 2 },
+  });
+
+  const groupAEntries = await enterTeams(groupsPlayoff.id, TOP_TEAMS.slice(0, 4), groupA.id);
+  const groupBEntries = await enterTeams(groupsPlayoff.id, TOP_TEAMS.slice(4, 8), groupB.id);
+
+  await playRoundRobinStage({
+    tournamentId: groupsPlayoff.id,
+    divisionId: groupA.id,
+    entries: groupAEntries,
+    weeksAgo: -34,
+    halfDuration: 20,
+  });
+  await playRoundRobinStage({
+    tournamentId: groupsPlayoff.id,
+    divisionId: groupB.id,
+    entries: groupBEntries,
+    weeksAgo: -34,
+    halfDuration: 20,
+  });
+
+  const groupAOrder = await orderByStandings(groupsPlayoff.id, groupA.id, groupAEntries);
+  const groupBOrder = await orderByStandings(groupsPlayoff.id, groupB.id, groupBEntries);
+
+  const winterSemiA = await playKnockout({
+    tournamentId: groupsPlayoff.id,
+    stage: "SEMI_FINAL",
+    bracketOrder: 0,
+    home: groupAOrder[0],
+    away: groupBOrder[1],
+    weeksAgo: -30,
+    halfDuration: 20,
+  });
+  const winterSemiB = await playKnockout({
+    tournamentId: groupsPlayoff.id,
+    stage: "SEMI_FINAL",
+    bracketOrder: 1,
+    home: groupBOrder[0],
+    away: groupAOrder[1],
+    weeksAgo: -30,
+    hourOffset: 2,
+    halfDuration: 20,
+  });
+
+  const winterSemiTeams = [groupAOrder[0], groupBOrder[1], groupBOrder[0], groupAOrder[1]];
+  const winterLosers = winterSemiTeams.filter((e) => e !== winterSemiA && e !== winterSemiB);
+
+  await playKnockout({
+    tournamentId: groupsPlayoff.id,
+    stage: "THIRD_PLACE",
+    home: winterLosers[0],
+    away: winterLosers[1],
+    weeksAgo: -28,
+    halfDuration: 20,
+  });
+  await playKnockout({
+    tournamentId: groupsPlayoff.id,
+    stage: "FINAL",
+    home: winterSemiA,
+    away: winterSemiB,
+    weeksAgo: -28,
+    hourOffset: 3,
+    halfDuration: 20,
+  });
+
+  console.log("Создаю однокруговой турнир без плей-офф…");
+  const singleGroup = await prisma.tournament.create({
+    data: {
+      slug: `kubok-pervokursnikov-${seasonStartYear - 1}`,
+      name: "Турнир первокурсников",
+      season: seasonLabel(seasonStartYear - 1),
+      format: "LEAGUE",
+      status: "FINISHED",
+      startDate: saturdayOffsetWeeks(now, -22),
+      endDate: saturdayOffsetWeeks(now, -18),
+      halfDurationMin: 20,
+      description:
+        "Простейший формат: одна группа из шести команд, круговой турнир в один круг, победитель определяется по таблице.",
+    },
+  });
+
+  const freshmenEntries = await enterTeams(singleGroup.id, SECOND_TEAMS.slice(0, 6), null);
+  await playRoundRobinStage({
+    tournamentId: singleGroup.id,
+    divisionId: null,
+    entries: freshmenEntries,
+    weeksAgo: -22,
+    halfDuration: 20,
   });
 
   await prisma.auditLog.create({

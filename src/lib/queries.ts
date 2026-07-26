@@ -14,6 +14,7 @@ export const matchCardArgs = {
   select: {
     id: true,
     kickoffAt: true,
+    kickoffTbd: true,
     status: true,
     round: true,
     stage: true,

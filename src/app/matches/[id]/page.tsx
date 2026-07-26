@@ -19,7 +19,7 @@ import {
   isLive,
   shortName,
 } from "@/lib/football";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTimeOrTbd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { slotLabel } from "@/lib/playoff";
 
@@ -185,7 +185,7 @@ export default async function MatchPage({ params }: { params: Promise<{ id: stri
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-border px-4 py-2 text-xs text-muted">
-          <span>{formatDateTime(match.kickoffAt)}</span>
+          <span>{formatDateTimeOrTbd(match.kickoffAt, match.kickoffTbd)}</span>
           {match.venue ? <span>{match.venue.name}</span> : null}
           {match.referee ? <span>Судья: {match.referee.fullName}</span> : null}
           {match.notes ? <span className="text-warning">{match.notes}</span> : null}

@@ -97,11 +97,32 @@ enum TournamentStatus {
   FINISHED
 }
 
+/// Серия турниров: «Чемпионат МГУ» как явление, живущее из года в год.
+/// Сезон остаётся отдельным Tournament — у каждого свой состав участников,
+/// регламент и календарь. Серия лишь связывает их в одну историю.
+model TournamentSeries {
+  id          Int     @id @default(autoincrement())
+  slug        String  @unique
+  name        String
+  description String?
+  logoUrl     String?
+
+  tournaments Tournament[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Tournament {
   id          Int              @id @default(autoincrement())
   slug        String           @unique
   name        String
   season      String // "2025/26"
+
+  // Разовый турнир серии не образует, поэтому связь необязательна.
+  // SetNull: удаление серии не должно уносить с собой историю сезонов.
+  seriesId Int?
+  series   TournamentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   format      TournamentFormat @default(LEAGUE)
   status      TournamentStatus @default(UPCOMING)
   startDate   DateTime
@@ -123,6 +144,7 @@ model Tournament {
   updatedAt DateTime @updatedAt
 
   @@index([status])
+  @@index([seriesId])
 }
 
 // Дивизион / группа внутри турнира. Для простой лиги можно не создавать.
@@ -133,6 +155,17 @@ model Division {
   name         String // "Высший дивизион", "Группа A"
   sortOrder    Int        @default(0)
 
+  // Своя длительность тайма: в одном турнире дивизион 8×8 и дивизион 6×6
+  // играют разное время. null — значит «как в турнире».
+  halfDurationMin Int?
+
+  // Дивизион, из которого сюда перенесены очки и статистика. Заполняется при
+  // разделении по итогам: «Верхняя половина» ссылается на «Первый этап».
+  // SetNull, а не Restrict: каскадное удаление турнира иначе не прошло бы.
+  parentDivisionId Int?
+  parentDivision   Division?  @relation("DivisionSplit", fields: [parentDivisionId], references: [id], onDelete: SetNull)
+  childDivisions   Division[] @relation("DivisionSplit")
+
   entries TournamentTeam[]
   matches Match[]
 
@@ -141,6 +174,7 @@ model Division {
   awaySourceOfMatches Match[] @relation("AwaySourceDivision")
 
   @@unique([tournamentId, name])
+  @@index([parentDivisionId])
 }
 
 // ─────────────────────────────── Команды и игроки ───────────────────────────
@@ -327,6 +361,12 @@ model Match {
   feedsAwayOf Match[] @relation("AwaySourceMatch")
 
   kickoffAt DateTime
+  // Время ещё не согласовано (генератор расставил только даты туров).
+  // В kickoffAt при этом лежит дата тура и служебные 12:00 МСК — якорь для
+  // сортировки и группировки по дням. Это время НИГДЕ не показывается:
+  // вместо него выводится «время уточняется». Как только время проставили —
+  // руками, пакетно по туру или импортом — флаг снимается.
+  kickoffTbd Boolean @default(false)
   venueId   Int?
   venue     Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
 

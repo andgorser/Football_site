@@ -18,10 +18,13 @@ export function StandingsTable({
   rows,
   highlightTeamId,
   showForm = true,
+  showCarried = false,
 }: {
   rows: StandingsRow[];
   highlightTeamId?: string;
   showForm?: boolean;
+  /** Показать колонку с очками, перенесёнными с прошлого этапа */
+  showCarried?: boolean;
 }) {
   if (rows.length === 0) {
     return <p className="px-4 py-8 text-center text-sm text-muted">Команды ещё не заявлены</p>;
@@ -42,6 +45,14 @@ export function StandingsTable({
               Мячи
             </th>
             <th className="w-10 px-1 py-2 text-center font-semibold" title="Разница мячей">±</th>
+            {showCarried ? (
+              <th
+                className="hidden w-12 px-1 py-2 text-center font-semibold sm:table-cell"
+                title="Очки, перенесённые с первого этапа"
+              >
+                Пер.
+              </th>
+            ) : null}
             <th className="w-10 px-1 py-2 text-center font-semibold" title="Очки">О</th>
             {showForm ? (
               <th className="hidden w-28 px-2 py-2 text-left font-semibold md:table-cell">
@@ -87,6 +98,11 @@ export function StandingsTable({
               <td className="px-1 py-2 text-center text-muted tabular-nums">
                 {row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}
               </td>
+              {showCarried ? (
+                <td className="hidden px-1 py-2 text-center text-muted tabular-nums sm:table-cell">
+                  {row.carriedPoints || "—"}
+                </td>
+              ) : null}
               <td className="px-1 py-2 text-center font-bold tabular-nums">{row.points}</td>
               {showForm ? (
                 <td className="hidden px-2 py-2 md:table-cell">

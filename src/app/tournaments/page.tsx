@@ -26,6 +26,18 @@ const FORMAT_LABEL = {
 } as const;
 
 export default async function TournamentsPage() {
+  const series = await prisma.tournamentSeries.findMany({
+    where: { tournaments: { some: {} } },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      _count: { select: { tournaments: true } },
+      tournaments: { orderBy: { startDate: "desc" }, take: 1, select: { season: true } },
+    },
+  });
+
   const tournaments = await prisma.tournament.findMany({
     orderBy: [{ status: "asc" }, { startDate: "desc" }],
     select: {
@@ -45,6 +57,25 @@ export default async function TournamentsPage() {
   return (
     <div>
       <PageTitle title="Турниры" subtitle="Все соревнования университета" />
+
+      {series.length > 0 ? (
+        <div className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold text-muted">По годам</h2>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {series.map((item) => (
+              <Link key={item.id} href={`/series/${item.slug}`}>
+                <Card className="h-full p-3 transition-colors hover:border-brand">
+                  <p className="text-sm font-semibold leading-tight">{item.name}</p>
+                  <p className="mt-1 text-xs text-subtle">
+                    {pluralize(item._count.tournaments, "сезон", "сезона", "сезонов")}
+                    {item.tournaments[0] ? ` · последний ${item.tournaments[0].season}` : ""}
+                  </p>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {tournaments.length === 0 ? (
         <Card>

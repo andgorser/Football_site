@@ -3,7 +3,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import type { MatchStatus } from "@prisma/client";
 
-import { matchOutcome, type StandingsRow } from "@/lib/football";
+import { matchOutcome, placeIsTight, type StandingsRow } from "@/lib/football";
 import { prisma } from "@/lib/prisma";
 import { getTournamentStandings } from "@/lib/stats";
 
@@ -81,7 +81,7 @@ const matchSelect = {
  * А вот перенесённый и любой идущий прямо сейчас мешают: места ещё могут
  * поменяться, и подставлять по ним участника рано.
  */
-async function completedDivisionIds(tournamentId: number): Promise<Set<number>> {
+export async function completedDivisionIds(tournamentId: number): Promise<Set<number>> {
   const rows = await prisma.match.groupBy({
     by: ["divisionId", "status"],
     where: { tournamentId, stage: "REGULAR", divisionId: { not: null } },
@@ -107,18 +107,6 @@ async function completedDivisionIds(tournamentId: number): Promise<Set<number>> 
   }
 
   return new Set([...seen].filter((id) => !pending.has(id)));
-}
-
-/** Соседи по таблице неразличимы по очкам, разнице и забитым мячам. */
-function placeIsTight(rows: StandingsRow[], place: number): boolean {
-  const current = rows[place - 1];
-  const next = rows[place];
-  if (!current || !next) return false;
-  return (
-    current.points === next.points &&
-    current.goalDiff === next.goalDiff &&
-    current.goalsFor === next.goalsFor
-  );
 }
 
 type Resolution =

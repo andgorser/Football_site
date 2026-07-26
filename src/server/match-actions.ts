@@ -5,7 +5,13 @@ import { z } from "zod";
 import type { MatchStatus } from "@prisma/client";
 
 import { getCurrentUser } from "@/lib/auth";
-import { EVENT_LABEL, isClockRunning, isPlayed, scoreFromEvents } from "@/lib/football";
+import {
+  EVENT_LABEL,
+  halfDurationOf,
+  isClockRunning,
+  isPlayed,
+  scoreFromEvents,
+} from "@/lib/football";
 import { prisma } from "@/lib/prisma";
 import { propagateAfterResult } from "@/server/playoff";
 
@@ -46,6 +52,7 @@ async function loadEditableMatch(matchId: number) {
         clockOffsetSec: true,
         periodStartedAt: true,
         tournament: { select: { halfDurationMin: true } },
+        division: { select: { halfDurationMin: true } },
       },
     }),
   ]);
@@ -160,7 +167,7 @@ export async function setMatchStatus(
   if (!loaded.ok) return fail(loaded.error);
   const { match, user } = loaded;
 
-  const half = match.tournament.halfDurationMin * 60;
+  const half = halfDurationOf(match.division, match.tournament) * 60;
   const status = parsed.data;
 
   let clockOffsetSec = elapsedSeconds(match);

@@ -6,7 +6,7 @@ import { RefereeSelect } from "@/components/admin/RefereeSelect";
 import { TeamCrest } from "@/components/TeamCrest";
 import { Badge, Card, EmptyState, PageTitle, TabLinks, buttonClass } from "@/components/ui";
 import { MATCH_STATUS_LABEL, isLive } from "@/lib/football";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTimeOrTbd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { awaySlotOf, homeSlotOf, slotLabel } from "@/lib/playoff";
 import { deleteMatch } from "@/server/admin-actions";
@@ -65,11 +65,15 @@ export default async function AdminMatchesPage({
       ...(tournamentId ? { tournamentId } : {}),
       ...statusFilter,
     },
-    orderBy: { kickoffAt: filter === "played" ? "desc" : "asc" },
+    // Второй ключ обязателен: у матчей одного тура время часто совпадает
+    // (а у несогласованных — совпадает всегда), и без него база вправе
+    // возвращать их в любом порядке — список «прыгает» между обновлениями.
+    orderBy: [{ kickoffAt: filter === "played" ? "desc" : "asc" }, { id: "asc" }],
     take: 100,
     select: {
       id: true,
       kickoffAt: true,
+      kickoffTbd: true,
       status: true,
       round: true,
       refereeId: true,
@@ -172,7 +176,7 @@ export default async function AdminMatchesPage({
                     <span className="truncate text-sm font-medium">{match.awayTeam?.team.shortName ?? slotLabel(awaySlotOf(match))}</span>
                   </div>
                   <p className="mt-1 text-xs text-muted">
-                    {formatDateTime(match.kickoffAt)}
+                    {formatDateTimeOrTbd(match.kickoffAt, match.kickoffTbd)}
                     {match.venue ? ` · ${match.venue.name}` : ""}
                   </p>
                   {match.notes ? (

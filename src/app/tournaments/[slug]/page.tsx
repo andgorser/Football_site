@@ -8,7 +8,7 @@ import { ScorersTable } from "@/components/ScorersTable";
 import { StandingsTable } from "@/components/StandingsTable";
 import { TeamCrest } from "@/components/TeamCrest";
 import { Badge, Card, CardHeader, EmptyState, PageTitle, TabLinks } from "@/components/ui";
-import { MATCH_STAGE_LABEL } from "@/lib/football";
+import { MATCH_STAGE_LABEL, halfDurationOf } from "@/lib/football";
 import { formatDate, pluralize } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { matchCardArgs, type MatchCard } from "@/lib/queries";
@@ -37,6 +37,25 @@ function tabsFor(format: TournamentFormat, hasPlayoff: boolean) {
     if (tab.key === "bracket") return hasPlayoff;
     return true;
   });
+}
+
+/**
+ * Подпись про длительность тайма. Обычно она одна на турнир, но дивизионы
+ * могут играть разными форматами (8×8 и 6×6) — тогда честнее перечислить.
+ */
+function halfDurationSummary(
+  tournament: { halfDurationMin: number },
+  divisions: { name: string; halfDurationMin: number | null }[],
+) {
+  const minutes = divisions.map((d) => halfDurationOf(d, tournament));
+  const uniform = minutes.every((m) => m === minutes[0]);
+
+  if (divisions.length === 0 || uniform) {
+    const value = minutes[0] ?? tournament.halfDurationMin;
+    return `2 тайма по ${value} мин`;
+  }
+
+  return `Тайм: ${divisions.map((d, i) => `${d.name} — ${minutes[i]} мин`).join(", ")}`;
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
@@ -72,6 +91,11 @@ export default async function TournamentPage({
       description: true,
       halfDurationMin: true,
       pointsForWin: true,
+      series: { select: { slug: true, name: true } },
+      divisions: {
+        orderBy: { sortOrder: "asc" },
+        select: { name: true, halfDurationMin: true },
+      },
       _count: { select: { entries: true, matches: true } },
     },
   });
@@ -93,7 +117,15 @@ export default async function TournamentPage({
         subtitle={
           <>
             Сезон {tournament.season} · {pluralize(tournament._count.entries, "команда", "команды", "команд")} ·{" "}
-            2 тайма по {tournament.halfDurationMin} мин · победа {tournament.pointsForWin} очка
+            {halfDurationSummary(tournament, tournament.divisions)} · победа {tournament.pointsForWin} очка
+            {tournament.series ? (
+              <>
+                {" · "}
+                <Link href={`/series/${tournament.series.slug}`} className="text-brand hover:underline">
+                  все сезоны →
+                </Link>
+              </>
+            ) : null}
           </>
         }
         action={
@@ -141,16 +173,56 @@ async function StandingsTab({ tournamentId }: { tournamentId: number }) {
     );
   }
 
+  // Дивизион, разделённый на половины, свой этап отыграл: его таблица уходит
+  // вниз как архив, чтобы наверху были только те, кто играет сейчас.
+  const current = divisions.filter((d) => !d.isArchived);
+  const archived = divisions.filter((d) => d.isArchived);
+  const hasCarry = divisions.some((d) => d.rows.some((r) => r.carriedPoints !== 0));
+
   return (
     <div className="space-y-4">
-      {divisions.map((division) => (
+      {current.map((division) => (
         <Card key={division.divisionId ?? "all"}>
-          <CardHeader title={division.divisionName} />
-          <StandingsTable rows={division.rows} />
+          <CardHeader
+            title={division.divisionName}
+            subtitle={
+              division.parentDivisionName
+                ? `Очки и статистика перенесены из таблицы «${division.parentDivisionName}»`
+                : undefined
+            }
+          />
+          <StandingsTable
+            rows={division.rows}
+            showCarried={division.rows.some((r) => r.carriedPoints !== 0)}
+          />
         </Card>
       ))}
+
+      {archived.length > 0 ? (
+        <details className="rounded-xl border border-border bg-surface">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+            Завершённые этапы ({archived.length})
+          </summary>
+          <div className="space-y-4 border-t border-border p-3">
+            {archived.map((division) => (
+              <Card key={division.divisionId ?? "all"}>
+                <CardHeader
+                  title={division.divisionName}
+                  subtitle="Круговой этап завершён — таблица сохранена как есть"
+                  action={<Badge>Архив</Badge>}
+                />
+                <StandingsTable rows={division.rows} />
+              </Card>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
       <p className="px-1 text-xs text-subtle">
         Места распределяются по очкам, затем по разнице мячей, забитым голам и личным встречам.
+        {hasCarry
+          ? " Колонка «Пер.» — очки, набранные на первом этапе; игры, мячи и разница тоже перенесены. Личные встречи учитываются только между матчами текущего этапа."
+          : ""}
       </p>
     </div>
   );

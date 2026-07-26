@@ -7,7 +7,7 @@ import { ActionButton } from "@/components/admin/ActionForm";
 import { TeamCrest } from "@/components/TeamCrest";
 import { Badge, Card, CardHeader, EmptyState, PageTitle, buttonClass } from "@/components/ui";
 import { MATCH_STAGE_LABEL, MATCH_STATUS_LABEL, PLAYOFF_STAGES } from "@/lib/football";
-import { formatDateTime, toDateTimeInput } from "@/lib/format";
+import { formatDateTimeOrTbd, toDateTimeInput } from "@/lib/format";
 import { awaySlotOf, homeSlotOf, slotLabel } from "@/lib/playoff";
 import { prisma } from "@/lib/prisma";
 import { deletePlayoffMatch, movePlayoffMatch } from "@/server/playoff-actions";
@@ -64,6 +64,7 @@ export default async function PlayoffPage({
       stage: true,
       bracketOrder: true,
       kickoffAt: true,
+      kickoffTbd: true,
       status: true,
       venueId: true,
       refereeId: true,
@@ -191,7 +192,7 @@ export default async function PlayoffPage({
                       score={match.awayScore}
                     />
                     <p className="text-xs text-subtle">
-                      {formatDateTime(match.kickoffAt)}
+                      {formatDateTimeOrTbd(match.kickoffAt, match.kickoffTbd)}
                       {match.venue ? ` · ${match.venue.name}` : ""}
                       {match.referee ? ` · ${match.referee.fullName}` : " · судья не назначен"}
                     </p>

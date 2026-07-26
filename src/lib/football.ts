@@ -55,6 +55,20 @@ export function isClockRunning(status: MatchStatus): boolean {
   return status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME";
 }
 
+/**
+ * Длительность тайма для конкретного матча.
+ *
+ * Регламент задаётся турниром, но дивизион может его переопределить:
+ * в одном турнире 8×8 и 6×6 играют тайм разной длины. Считаем в одном месте,
+ * чтобы табло судьи и подписи на сайте не разошлись.
+ */
+export function halfDurationOf(
+  division: { halfDurationMin: number | null } | null | undefined,
+  tournament: { halfDurationMin: number },
+): number {
+  return division?.halfDurationMin ?? tournament.halfDurationMin;
+}
+
 export const MATCH_STATUS_LABEL: Record<MatchStatus, string> = {
   SCHEDULED: "Не начался",
   FIRST_HALF: "1-й тайм",
@@ -315,7 +329,29 @@ export type StandingsRow = {
   goalDiff: number;
   points: number;
   pointsAdjustment: number;
+  /** Сколько очков пришло с прошлого этапа. 0 — переноса не было. */
+  carriedPoints: number;
+  /** Сколько игр зачтено с прошлого этапа — чтобы подписать колонку «И». */
+  carriedPlayed: number;
   /** Последние матчи, свежие первыми: "В" | "Н" | "П" */
+  form: ("В" | "Н" | "П")[];
+};
+
+/**
+ * Показатели, перенесённые из таблицы предыдущего этапа.
+ *
+ * Нужны, когда дивизион после кругового турнира делится на верхнюю и нижнюю
+ * половину: половины продолжают счёт, а не начинают с нуля.
+ */
+export type StandingsCarry = {
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  /** Очки уже с учётом снятых: иначе штраф применился бы дважды. */
+  points: number;
   form: ("В" | "Н" | "П")[];
 };
 
@@ -343,14 +379,22 @@ type PointsRule = { pointsForWin: number; pointsForDraw: number; pointsForLoss: 
  * Строит турнирную таблицу. Сортировка: очки → разница мячей → забитые →
  * личные встречи → название. Личные встречи учитываются только между
  * командами, у которых совпали все предыдущие показатели.
+ *
+ * `carryOver` (ключ — entryId) переносит показатели предыдущего этапа: с ними
+ * строка стартует не с нуля. Аргумент необязательный — обычная таблица
+ * считается ровно как раньше.
  */
 export function computeStandings(
   entries: StandingsEntry[],
   matches: StandingsMatch[],
   rules: PointsRule,
+  carryOver?: Map<number, StandingsCarry>,
 ): StandingsRow[] {
   const rows = new Map<number, StandingsRow>();
   for (const entry of entries) {
+    // Перенесённые очки УЖЕ включают снятые: прибавлять pointsAdjustment
+    // второй раз нельзя, иначе штраф применится дважды.
+    const carry = carryOver?.get(entry.id);
     rows.set(entry.id, {
       place: 0,
       entryId: entry.id,
@@ -360,15 +404,17 @@ export function computeStandings(
       teamSlug: entry.team.slug,
       logoUrl: entry.team.logoUrl,
       divisionId: entry.divisionId,
-      played: 0,
-      won: 0,
-      drawn: 0,
-      lost: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
+      played: carry?.played ?? 0,
+      won: carry?.won ?? 0,
+      drawn: carry?.drawn ?? 0,
+      lost: carry?.lost ?? 0,
+      goalsFor: carry?.goalsFor ?? 0,
+      goalsAgainst: carry?.goalsAgainst ?? 0,
       goalDiff: 0,
-      points: entry.pointsAdjustment,
+      points: carry ? carry.points : entry.pointsAdjustment,
       pointsAdjustment: entry.pointsAdjustment,
+      carriedPoints: carry?.points ?? 0,
+      carriedPlayed: carry?.played ?? 0,
       form: [],
     });
   }
@@ -403,22 +449,22 @@ export function computeStandings(
       away.lost++;
       homePoints = rules.pointsForWin;
       awayPoints = rules.pointsForLoss;
-      if (home.form.length < 5) home.form.push("В");
-      if (away.form.length < 5) away.form.push("П");
+      home.form.push("В");
+      away.form.push("П");
     } else if (hs < as) {
       away.won++;
       home.lost++;
       homePoints = rules.pointsForLoss;
       awayPoints = rules.pointsForWin;
-      if (home.form.length < 5) home.form.push("П");
-      if (away.form.length < 5) away.form.push("В");
+      home.form.push("П");
+      away.form.push("В");
     } else {
       home.drawn++;
       away.drawn++;
       homePoints = rules.pointsForDraw;
       awayPoints = rules.pointsForDraw;
-      if (home.form.length < 5) home.form.push("Н");
-      if (away.form.length < 5) away.form.push("Н");
+      home.form.push("Н");
+      away.form.push("Н");
     }
 
     home.points += homePoints;
@@ -434,7 +480,14 @@ export function computeStandings(
   }
 
   const result = [...rows.values()];
-  for (const row of result) row.goalDiff = row.goalsFor - row.goalsAgainst;
+  for (const row of result) {
+    row.goalDiff = row.goalsFor - row.goalsAgainst;
+    // Форма: сначала свои матчи (они свежее), затем хвост с прошлого этапа.
+    // Обрезаем в конце, а не на лету, иначе у второго этапа формы не было бы
+    // видно вовсе, пока он не наберёт пять своих матчей.
+    const carry = carryOver?.get(row.entryId);
+    row.form = carry ? [...row.form, ...carry.form].slice(0, 5) : row.form.slice(0, 5);
+  }
 
   result.sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
@@ -453,6 +506,24 @@ export function computeStandings(
   });
 
   return result;
+}
+
+/**
+ * Соседи по таблице неразличимы по очкам, разнице и забитым мячам.
+ *
+ * Нужно там, где место решает судьбу: подстановка в сетку плей-офф и граница
+ * при разделении дивизиона на половины. В таких случаях лучше предупредить
+ * организатора, чем молча положиться на личные встречи.
+ */
+export function placeIsTight(rows: StandingsRow[], place: number): boolean {
+  const current = rows[place - 1];
+  const next = rows[place];
+  if (!current || !next) return false;
+  return (
+    current.points === next.points &&
+    current.goalDiff === next.goalDiff &&
+    current.goalsFor === next.goalsFor
+  );
 }
 
 // ───────────────────────────── Статистика игроков ───────────────────────────

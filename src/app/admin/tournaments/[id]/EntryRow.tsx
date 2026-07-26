@@ -12,13 +12,12 @@ import { removeEntry, updateEntry } from "@/server/admin-actions";
 export type EntryRowData = {
   id: number;
   divisionId: number | null;
-  pointsAdjustment: number;
   matchCount: number;
   rosterCount: number;
   team: { name: string; shortName: string; logoUrl: string | null; primaryColor: string | null };
 };
 
-/** Строка заявленной команды: дивизион и снятые очки правятся на месте. */
+/** Строка заявленной команды: дивизион правится на месте. */
 export function EntryRow({
   entry,
   divisions,
@@ -32,14 +31,13 @@ export function EntryRow({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [divisionId, setDivisionId] = useState(entry.divisionId);
-  const [adjustment, setAdjustment] = useState(entry.pointsAdjustment);
 
-  const dirty = divisionId !== entry.divisionId || adjustment !== entry.pointsAdjustment;
+  const dirty = divisionId !== entry.divisionId;
 
   function save() {
     setError(null);
     startTransition(async () => {
-      const result = await updateEntry(entry.id, { divisionId, pointsAdjustment: adjustment });
+      const result = await updateEntry(entry.id, { divisionId });
       if (result.error) setError(result.error);
       else router.refresh();
     });
@@ -79,15 +77,6 @@ export function EntryRow({
           ))}
         </select>
       ) : null}
-
-      <input
-        type="number"
-        value={adjustment}
-        onChange={(e) => setAdjustment(Number(e.target.value))}
-        className={cn(inputClass, "w-20 py-1 text-xs")}
-        title="Снятые или добавленные очки"
-        aria-label="Корректировка очков"
-      />
 
       <Link
         href={`/admin/tournaments/${tournamentId}/roster/${entry.id}`}

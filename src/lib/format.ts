@@ -61,6 +61,24 @@ export function formatDateTime(date: Date): string {
   return `${formatDate(date)}, ${formatTime(date)}`;
 }
 
+/**
+ * Матч, у которого время ещё не согласовано (`Match.kickoffTbd`).
+ *
+ * В базе у такого матча лежит дата тура и служебные 12:00 — показывать их
+ * нельзя, иначе организаторы примут заглушку за настоящее время. Короткий
+ * вариант — для узкой колонки в списках, длинный — для карточки матча.
+ */
+export const TBD_TIME_SHORT = "—:—";
+export const TBD_TIME_LABEL = "время уточняется";
+
+export function formatTimeOrTbd(date: Date, tbd: boolean): string {
+  return tbd ? TBD_TIME_LABEL : formatTime(date);
+}
+
+export function formatDateTimeOrTbd(date: Date, tbd: boolean): string {
+  return tbd ? `${formatDate(date)}, ${TBD_TIME_LABEL}` : formatDateTime(date);
+}
+
 /** Ключ дня по московскому времени: "2026-03-14". Годится для группировки. */
 export function moscowDayKey(date: Date): string {
   return new Date(date.getTime() + MSK_OFFSET_MS).toISOString().slice(0, 10);

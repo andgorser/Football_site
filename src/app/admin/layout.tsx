@@ -5,9 +5,11 @@ import { requireRole } from "@/lib/auth";
 const SECTIONS = [
   { href: "/admin", label: "Обзор" },
   { href: "/admin/tournaments", label: "Турниры" },
+  { href: "/admin/series", label: "Серии" },
   { href: "/admin/matches", label: "Матчи" },
   { href: "/admin/teams", label: "Команды" },
   { href: "/admin/players", label: "Игроки" },
+  { href: "/admin/venues", label: "Площадки" },
   { href: "/admin/users", label: "Пользователи" },
 ];
 

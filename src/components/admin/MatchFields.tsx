@@ -13,6 +13,7 @@ export type MatchFieldsData = {
     homeTeamId: number | null;
     awayTeamId: number | null;
     kickoffAt: Date;
+    kickoffTbd: boolean;
     venueId: number | null;
     refereeId: string | null;
     round: number | null;
@@ -67,7 +68,10 @@ export function MatchFields({
         </>
       )}
 
-      <Field label="Дата и время">
+      <Field
+        label="Дата и время"
+        hint="Снимите галочку, когда время согласовано — на сайте появится точное время"
+      >
         <input
           type="datetime-local"
           name="kickoffAt"
@@ -75,6 +79,16 @@ export function MatchFields({
           defaultValue={toDateTimeInput(defaults?.kickoffAt ?? new Date())}
           className={inputClass}
         />
+        <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            name="kickoffTbd"
+            value="1"
+            defaultChecked={defaults?.kickoffTbd ?? false}
+            className="size-4 accent-brand"
+          />
+          Время уточняется (на сайте вместо времени будет «—:—»)
+        </label>
       </Field>
 
       <Field label="Место проведения">

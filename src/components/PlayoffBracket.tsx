@@ -9,7 +9,7 @@ import {
   isLive,
   matchOutcome,
 } from "@/lib/football";
-import { formatShortDate, formatTime } from "@/lib/format";
+import { formatShortDate, formatTime, TBD_TIME_SHORT } from "@/lib/format";
 import { awaySlotOf, homeSlotOf, slotLabel } from "@/lib/playoff";
 import type { MatchCard } from "@/lib/queries";
 
@@ -93,7 +93,8 @@ function BracketMatch({ match }: { match: MatchCard }) {
           <LiveBadge />
         ) : (
           <span>
-            {formatShortDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}
+            {formatShortDate(match.kickoffAt)} ·{" "}
+            {match.kickoffTbd ? TBD_TIME_SHORT : formatTime(match.kickoffAt)}
           </span>
         )}
       </p>

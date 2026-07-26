@@ -4,7 +4,7 @@ import { LiveMinute } from "@/components/LiveMinute";
 import { TeamCrest } from "@/components/TeamCrest";
 import { cn } from "@/lib/cn";
 import { currentMinute, isLive, isPlayed, MATCH_STATUS_SHORT } from "@/lib/football";
-import { formatShortDate, formatTime } from "@/lib/format";
+import { formatShortDate, formatTime, TBD_TIME_SHORT } from "@/lib/format";
 import { awaySlotOf, homeSlotOf, slotLabel } from "@/lib/playoff";
 import type { MatchCard } from "@/lib/queries";
 
@@ -58,8 +58,11 @@ export function MatchRow({
               <span className="text-subtle">{formatShortDate(match.kickoffAt)}</span>
             ) : null}
             <span className={cn(played ? "text-subtle" : "font-medium text-muted")}>
-              {formatTime(match.kickoffAt)}
+              {match.kickoffTbd ? TBD_TIME_SHORT : formatTime(match.kickoffAt)}
             </span>
+            {match.kickoffTbd ? (
+              <span className="text-[10px] leading-tight text-subtle">уточняется</span>
+            ) : null}
             {cancelled ? (
               <span className="text-[10px] font-semibold text-warning">
                 {MATCH_STATUS_SHORT[match.status]}

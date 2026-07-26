@@ -188,6 +188,8 @@ export function RefereeConsole({
       <Card className="overflow-hidden">
         <div className="flex items-center justify-center gap-2 border-b border-border px-4 py-2 text-center text-xs text-muted">
           <span className="truncate">{match.tournamentName}</span>
+          {/* Регламент дивизиона: 8×8 и 6×6 играют тайм разной длины */}
+          <span className="shrink-0 text-subtle">· тайм {match.halfDurationMin} мин</span>
           {/* Баннер уедет при прокрутке, а эта пометка всегда на виду */}
           {!assignment.assigned ? <Badge tone="warning">Чужой матч</Badge> : null}
         </div>

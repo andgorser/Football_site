@@ -10,8 +10,8 @@ import {
 } from "@/app/referee/[id]/RefereeConsole";
 import { Card, buttonClass } from "@/components/ui";
 import { canEditMatch, isAssignedReferee, requireUser } from "@/lib/auth";
-import { compareEvents, shortName } from "@/lib/football";
-import { formatDateTime } from "@/lib/format";
+import { compareEvents, halfDurationOf, shortName } from "@/lib/football";
+import { formatDateTimeOrTbd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { rosterOrderBy } from "@/lib/queries";
 
@@ -52,7 +52,7 @@ export default async function RefereeMatchPage({ params }: { params: Promise<{ i
     where: { id: matchId },
     include: {
       tournament: { select: { name: true, season: true, halfDurationMin: true } },
-      division: { select: { name: true } },
+      division: { select: { name: true, halfDurationMin: true } },
       venue: { select: { name: true } },
       referee: { select: { fullName: true } },
       homeTeam: {
@@ -173,7 +173,7 @@ export default async function RefereeMatchPage({ params }: { params: Promise<{ i
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted">
-          <p>{formatDateTime(match.kickoffAt)}</p>
+          <p>{formatDateTimeOrTbd(match.kickoffAt, match.kickoffTbd)}</p>
           {match.venue ? <p>{match.venue.name}</p> : null}
         </div>
         <div className="flex gap-2">
@@ -196,7 +196,7 @@ export default async function RefereeMatchPage({ params }: { params: Promise<{ i
           awayShootoutScore: match.awayShootoutScore,
           periodStartedAt: match.periodStartedAt?.toISOString() ?? null,
           clockOffsetSec: match.clockOffsetSec,
-          halfDurationMin: match.tournament.halfDurationMin,
+          halfDurationMin: halfDurationOf(match.division, match.tournament),
           kickoffAt: match.kickoffAt.toISOString(),
           tournamentName: `${match.tournament.name}${match.division ? ` · ${match.division.name}` : ""}${
             match.round ? ` · ${match.round}-й тур` : ""
